@@ -7,18 +7,14 @@ import (
 	"github.com/google/gopacket/pcap"
 	"log"
 	"math"
-	"net"
 	"packet-sniffer/pkg/goprettypackets"
-	"sync"
+	"packet-sniffer/pkg/goresolve"
 )
 
 var (
 	deviceName         = flag.String("interface", "enp0s31f6", "interface name (ip addr)")
 	showLayers         = flag.Bool("show-layers", true, "display layers and their content")
 	resolveIpAddresses = flag.Bool("resolve-ip", true, "try finding host name if possible")
-
-	resolvedIp     = make(map[string][]string, 0)
-	resolveIpMutex sync.Mutex
 )
 
 func main() {
@@ -43,16 +39,18 @@ func main() {
 		flow := networkLayer.NetworkFlow()
 
 		go func(packet gopacket.Packet, flow gopacket.Flow) {
+			var srcString string
+			var dstString string
+
 			if *resolveIpAddresses {
-				src := resolveIp(flow.Src().String())
-				dst := resolveIp(flow.Dst().String())
-
-				fmt.Printf("Got a packet : source => (%s) %v , destination => (%s) %v\n",
-					flow.Src(), src, flow.Dst(), dst)
-
+				srcString = fmt.Sprintf("(%s) %v", flow.Src(), goresolve.Ip(flow.Src().String()))
+				dstString = fmt.Sprintf("(%s) %v", flow.Dst(), goresolve.Ip(flow.Dst().String()))
 			} else {
-				fmt.Printf("Got a packet : source => %s , destination => %s\n", flow.Src(), flow.Dst())
+				srcString = flow.Src().String()
+				dstString = flow.Dst().String()
 			}
+
+			fmt.Printf("Got a packet : source => %s , destination => %s\n", srcString, dstString)
 
 			if *showLayers {
 				for _, layer := range packet.Layers() {
@@ -73,24 +71,6 @@ func displayLayer(layer *gopacket.Layer, packet gopacket.Packet) {
 
 	fmt.Printf("\tlayer type => %s\n\tlayer content => %s\n\tlayer payload => %s\n",
 		layerType.String(), layerContentFormatted, layerPayloadFormatted)
-}
-
-func resolveIp(ip string) []string {
-	resolveIpMutex.Lock()
-	defer resolveIpMutex.Unlock()
-
-	if resolvedIp[ip] != nil {
-		return resolvedIp[ip]
-	}
-
-	ips, ok := net.LookupAddr(ip)
-	if ok != nil {
-		fmt.Println(ok)
-		ips = []string{ip}
-	}
-
-	resolvedIp[ip] = ips
-	return ips
 }
 
 func capturePackets(handle *pcap.Handle, output chan gopacket.Packet) {
