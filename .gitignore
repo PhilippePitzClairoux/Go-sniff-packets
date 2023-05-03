@@ -1,2 +1,5 @@
-packet-sniffer
 .idea
+.git
+
+packet-sniffer
+go.sum
