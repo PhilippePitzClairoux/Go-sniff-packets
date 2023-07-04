@@ -9,8 +9,8 @@ import (
 	"log"
 	"math"
 	"os"
-	"packet-sniffer/pkg/goprettypackets"
-	"packet-sniffer/pkg/goresolve"
+	"packet-sniffer/goprettypackets"
+	"packet-sniffer/goresolve"
 	"strings"
 )
 
