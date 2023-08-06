@@ -3,7 +3,6 @@
 package goresolve
 
 import (
-	"fmt"
 	"net"
 	"sync"
 )
@@ -24,7 +23,6 @@ func Ip(ip string) []string {
 
 	ips, ok := net.LookupAddr(ip)
 	if ok != nil {
-		fmt.Println(ok)
 		ips = []string{ip}
 	}
 

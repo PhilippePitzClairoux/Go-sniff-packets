@@ -7,7 +7,7 @@ const (
 )
 
 func FormatRawPacket(array []byte) string {
-	var output = "\n\t\t"
+	var output = ""
 
 	if len(array) == 0 {
 		return output

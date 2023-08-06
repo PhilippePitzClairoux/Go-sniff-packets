@@ -1,108 +1,81 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 	"log"
 	"math"
 	"os"
-	"packet-sniffer/goprettypackets"
-	"packet-sniffer/goresolve"
-	"strings"
+	"packet-sniffer/internal/database"
+	tui2 "packet-sniffer/internal/tui"
 )
 
 var (
-	deviceName         = flag.String("interface", "enp0s31f6", "interface name (ip addr)")
-	showLayers         = flag.Bool("show-layers", true, "display layers and their content")
-	resolveIpAddresses = flag.Bool("resolve-ip", true, "try finding host name if possible")
-	websiteFilter      = flag.String("website-filter", "", "Only show packets that have this website")
+	deviceName = flag.String("interface", "enp0s31f6", "interface name (ip addr)")
 )
 
 func main() {
 	flag.Parse()
 	packets := make(chan gopacket.Packet)
+	stopChannel := make(chan struct{})
+	pckPreview := make(chan string)
+
 	defer close(packets)
+	defer close(stopChannel)
+	defer close(pckPreview)
 
-	fmt.Println("Got the following values : ", *deviceName, *showLayers, *resolveIpAddresses, *websiteFilter)
-	bufio.NewReader(os.Stdin).ReadLine()
-
-	listener, err := pcap.OpenLive(*deviceName, math.MaxInt32, true, pcap.BlockForever)
-
+	// Setup pcap pcapHandler
+	pcapHandler, err := pcap.OpenLive(*deviceName, math.MaxInt32, true, pcap.BlockForever)
 	assertError(err, "Could not open interface in live mode.")
-	go capturePackets(listener, packets)
 
-	defer listener.Close()
-	for packet := range packets {
+	// Setup logfile after we have the confirmation we can run command as SUDO/admin/root
+	logFile, err := os.OpenFile("go-sniff.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	assertError(err, "Could not open/create/append to log file")
 
-		networkLayer := packet.NetworkLayer()
-		if networkLayer == nil {
-			fmt.Println("Could not get network layer")
-			continue
-		}
+	defer logFile.Close()
+	log.SetOutput(logFile)
 
-		flow := networkLayer.NetworkFlow()
+	go capturePackets(pcapHandler, packets, stopChannel)
+	go database.StorePackets(packets, pckPreview, stopChannel)
 
-		go func(packet gopacket.Packet, flow gopacket.Flow) {
-			var srcString = flow.Src().String()
-			var dstString = flow.Dst().String()
-			var displayPacket = len(*websiteFilter) > 0
-			resolveIpAddress(&displayPacket, &srcString, &dstString)
+	tui := tea.NewProgram(tui2.NewPacketInfinitSpinner(pckPreview))
+	var p tea.Model
 
-			if (len(*websiteFilter) > 0 && displayPacket) || len(*websiteFilter) == 0 {
-				fmt.Printf("Got a packet : source => %s , destination => %s\n", srcString, dstString)
-
-				if *showLayers {
-					for _, layer := range packet.Layers() {
-						displayLayer(&layer)
-					}
-				}
-			}
-		}(packet, flow)
+	if p, err = tui.Run(); err != nil {
+		log.Printf("Error running program: %s\n", err)
+		fmt.Println("Could run program properly. Please view go-sniff.log for more details")
+		log.Fatal(tui.ReleaseTerminal())
 	}
+
+	fmt.Println("Closing channels that consume/generate packets...")
+	fmt.Printf(
+		"We've received and stored %d packets! Please view packetdatabase.db in order to search/view transmitted data.",
+		p.(tui2.SpinnerModel).GetCount(),
+	)
 }
 
-func resolveIpAddress(displayPacket *bool, srcString *string, dstString *string) {
-	if *resolveIpAddresses || *displayPacket {
-		src := goresolve.Ip(*srcString)
-		dst := goresolve.Ip(*dstString)
-
-		if strings.Contains(src[0], *websiteFilter) || strings.Contains(dst[0], *websiteFilter) {
-			*displayPacket = true
-		} else {
-			*displayPacket = false
-		}
-
-		*srcString = fmt.Sprintf("(%s) %v", *srcString, src)
-		*dstString = fmt.Sprintf("(%s) %v", *dstString, dst)
-	}
-}
-
-func displayLayer(layer *gopacket.Layer) {
-	layerType := (*layer).LayerType()
-	layerContent := (*layer).LayerContents()
-	layerPayload := (*layer).LayerPayload()
-
-	layerContentFormatted := goprettypackets.FormatRawPacket(layerContent)
-	layerPayloadFormatted := goprettypackets.FormatRawPacket(layerPayload)
-
-	fmt.Printf("\tlayer type => %s\n\tlayer content => %s\n\tlayer payload => %s\n",
-		layerType.String(), layerContentFormatted, layerPayloadFormatted)
-}
-
-func capturePackets(handle *pcap.Handle, output chan gopacket.Packet) {
+func capturePackets(handle *pcap.Handle, output chan<- gopacket.Packet, stop chan struct{}) {
 	defer handle.Close()
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
-	for packet := range packetSource.Packets() {
-		output <- packet
+	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	packetChannel := packetSource.Packets()
+
+	for {
+		select {
+		case <-stop:
+			log.Printf("Stopping internal sending due to stop signal...")
+			return
+		case packet := <-packetChannel:
+			output <- packet
+		}
 	}
 }
 
 func assertError(_error error, message string) {
 	if _error != nil {
-		log.Fatal(message)
+		log.Fatal(message, _error)
 	}
 }
