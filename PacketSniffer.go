@@ -6,15 +6,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"gosniff/internal/database"
+	tui2 "gosniff/internal/tui"
 	"log"
 	"math"
 	"os"
-	"packet-sniffer/internal/database"
-	tui2 "packet-sniffer/internal/tui"
 )
 
 var (
-	deviceName = flag.String("interface", "enp0s31f6", "interface name (ip addr)")
+	captureOnly = flag.Bool("tui", false, "Enable/Disable TUI (if tui == true, packet viewing and searching will be possible)")
 )
 
 func main() {
@@ -28,7 +28,7 @@ func main() {
 	defer close(pckPreview)
 
 	// Setup pcap pcapHandler
-	pcapHandler, err := pcap.OpenLive(*deviceName, math.MaxInt32, true, pcap.BlockForever)
+	pcapHandler, err := pcap.OpenLive("any", math.MaxInt32, true, pcap.BlockForever)
 	assertError(err, "Could not open interface in live mode.")
 
 	// Setup logfile after we have the confirmation we can run command as SUDO/admin/root
@@ -41,13 +41,18 @@ func main() {
 	go capturePackets(pcapHandler, packets, stopChannel)
 	go database.StorePackets(packets, pckPreview, stopChannel)
 
-	tui := tea.NewProgram(tui2.NewPacketInfinitSpinner(pckPreview))
+	var tui tea.Model
+	if *captureOnly {
+		tui = tui2.NewBrowsePacketTui()
+	} else {
+		tui = tui2.NewPacketInfinitSpinner(pckPreview)
+	}
+
 	var p tea.Model
 
-	if p, err = tui.Run(); err != nil {
+	if p, err = tea.NewProgram(tui).Run(); err != nil {
 		log.Printf("Error running program: %s\n", err)
 		fmt.Println("Could run program properly. Please view go-sniff.log for more details")
-		log.Fatal(tui.ReleaseTerminal())
 	}
 
 	fmt.Println("Closing channels that consume/generate packets...")

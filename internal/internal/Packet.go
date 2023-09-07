@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"github.com/google/gopacket"
 	layers2 "github.com/google/gopacket/layers"
+	"gosniff/pkg/goprettypackets"
+	"gosniff/pkg/goresolve"
 	"log"
-	"packet-sniffer/pkg/goprettypackets"
-	"packet-sniffer/pkg/goresolve"
 	"strconv"
 	"strings"
 )
@@ -17,6 +17,18 @@ type Packet struct {
 	Content     string
 	Time        string
 	Layers      map[string]LayerInformation
+}
+
+func (p Packet) FilterValue() string {
+	return p.Source + "|" + p.Destination + "|" + p.Time + "|" + p.Content
+}
+
+func (p Packet) Title() string {
+	return p.Time
+}
+
+func (p Packet) Description() string {
+	return p.Source + "|" + p.Destination
 }
 
 type LayerInformation struct {
@@ -93,7 +105,7 @@ func displayLayer(layer *gopacket.Layer) string {
 	layerContentFormatted := goprettypackets.FormatRawPacket(layerContent)
 	layerPayloadFormatted := goprettypackets.FormatRawPacket(layerPayload)
 
-	return fmt.Sprintf("\tlayer type => %s\n\tlayer Content =>\n %s\n\tlayer Payload => %s\n",
+	return fmt.Sprintf("\tlayer type => %s\n\t\tlayer Content =>\n\t\t %s\n\t\tlayer Payload => %s\n",
 		layerType.String(), layerContentFormatted, layerPayloadFormatted)
 }
 

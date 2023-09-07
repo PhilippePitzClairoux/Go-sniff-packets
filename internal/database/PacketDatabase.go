@@ -4,15 +4,16 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/google/gopacket"
+	"gosniff/internal/internal"
 	"log"
-	"packet-sniffer/internal/internal"
 )
 
 const (
 	InsertPacketQuery = `INSERT INTO packets (time, source, destination, content) VALUES (?, ?, ?, ?)`
 	InsertLayerQuery  = `INSERT INTO packet_layers (packet_id,layer_type, content, content_blob, payload, payload_blob) VALUES (?, ?, ?, ?, ?, ?)`
-	FetchLastRows     = `SELECT time, source, destination, content FROM packets ORDER BY time LIMIT 100`
+	FetchLastRows     = "SELECT `time`, `source`, `destination`, `content` FROM packets ORDER BY time LIMIT 100"
 	CountPackets      = `SELECT COUNT(*) FROM packets WHERE time >= ?`
+	SearchPacket      = `SELECT packets.id, time, source, destination, packets.content FROM packets INNER JOIN packet_layers ON packet_layers.packet_id = packets.id WHERE packet_layers.content LIKE ? OR packet_layers.payload LIKE ?`
 )
 
 func StorePackets(packets <-chan gopacket.Packet, preview chan<- string, stop chan struct{}) {
@@ -24,10 +25,13 @@ func StorePackets(packets <-chan gopacket.Packet, preview chan<- string, stop ch
 		case packet := <-packets:
 			formattedPacket := internal.NewPacket(packet)
 			if formattedPacket != nil {
-				preview <- fmt.Sprintf("%s -> %s", formattedPacket.Source, formattedPacket.Destination)
+
+				if cap(preview) != 0 {
+					preview <- fmt.Sprintf("%s -> %s", formattedPacket.Source, formattedPacket.Destination)
+				}
 				err := InsertPacket(formattedPacket)
 				if err != nil {
-					log.Printf("Could not insert internal to database : %s\n", err)
+					log.Printf("Could not insert packet to database : %s\n", err)
 				}
 			}
 
@@ -101,7 +105,7 @@ func FetchLastInsertedPackets() ([]internal.Packet, error) {
 		return nil, err
 	}
 
-	packets := make([]internal.Packet, 100)
+	packets := make([]internal.Packet, 0)
 	for rows.Next() {
 		var time, source, destination, content string
 		err = rows.Scan(&time, &source, &destination, &content)
@@ -133,4 +137,39 @@ func GetInsertedPackets(t string) (int, error) {
 	}
 
 	return val, nil
+}
+
+func SearchPackets(filter string) ([]internal.Packet, error) {
+	db, err := sql.Open("sqlite3", "packetdatabase.bd")
+	if err != nil {
+		return nil, err
+	}
+
+	prepare, err := db.Prepare(SearchPacket)
+	if err != nil {
+		return nil, err
+	}
+
+	filter = "%" + filter + "%"
+	rows, err := prepare.Query(filter, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	packets := make([]internal.Packet, 0)
+	for rows.Next() {
+		var time, source, destination, content string
+		err = rows.Scan(&time, &source, &destination, &content)
+		if err != nil {
+			return nil, err
+		}
+		packets = append(packets, internal.Packet{
+			Time:        time,
+			Source:      source,
+			Destination: destination,
+			Content:     content,
+		})
+	}
+
+	return packets, nil
 }
